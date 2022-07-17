@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	crand "crypto/rand"
 	"fmt"
 	"html/template"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -23,6 +25,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -32,6 +35,7 @@ var (
 
 const (
 	postsPerPage  = 20
+	assetsDir     = "../public/"
 	ISO8601Format = "2006-01-02T15:04:05-07:00"
 	UploadLimit   = 10 * 1024 * 1024 // 10mb
 )
@@ -89,6 +93,28 @@ func dbInitialize() {
 	for _, sql := range sqls {
 		db.Exec(sql)
 	}
+}
+
+func imgInitialize() {
+	os.RemoveAll(assetsDir + "/image")
+	os.Mkdir(assetsDir+"/image", 0o755)
+	var posts []Post
+	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
+
+	var wg sync.WaitGroup
+	sem := semaphore.NewWeighted(100)
+	for _, p := range posts {
+		p := p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem.Acquire(context.TODO(), 1)
+			defer sem.Release(1)
+			path := assetsDir + imageURL(p)
+			os.WriteFile(path, p.Imgdata, 0o644)
+		}()
+	}
+	wg.Wait()
 }
 
 func tryLogin(accountName, password string) *User {
@@ -263,6 +289,9 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	if r.URL.Query().Has("all") {
+		imgInitialize()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -557,7 +586,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `id` = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
@@ -649,12 +678,11 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
+	query := "INSERT INTO `posts` (`user_id`, `mime`, `body`, `imgdata`) VALUES (?,?,?,NULL)"
 	result, err := db.Exec(
 		query,
 		me.ID,
 		mime,
-		filedata,
 		r.FormValue("body"),
 	)
 	if err != nil {
@@ -668,39 +696,13 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
-}
-
-func getImage(w http.ResponseWriter, r *http.Request) {
-	pidStr := chi.URLParam(r, "id")
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	post := Post{}
-	err = db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = os.WriteFile(assetsDir+imageURL(Post{ID: int(pid), Mime: mime}), filedata, 0o644)
 	if err != nil {
 		log.Print(err)
 		return
 	}
 
-	ext := chi.URLParam(r, "ext")
-
-	if ext == "jpg" && post.Mime == "image/jpeg" ||
-		ext == "png" && post.Mime == "image/png" ||
-		ext == "gif" && post.Mime == "image/gif" {
-		w.Header().Set("Content-Type", post.Mime)
-		_, err := w.Write(post.Imgdata)
-		if err != nil {
-			log.Print(err)
-			return
-		}
-		return
-	}
-
-	w.WriteHeader(http.StatusNotFound)
+	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
 
 func postComment(w http.ResponseWriter, r *http.Request) {
@@ -842,7 +844,6 @@ func main() {
 	r.Get("/posts", getPosts)
 	r.Get("/posts/{id}", getPostsID)
 	r.Post("/", postIndex)
-	r.Get("/image/{id}.{ext}", getImage)
 	r.Post("/comment", postComment)
 	r.Get("/admin/banned", getAdminBanned)
 	r.Post("/admin/banned", postAdminBanned)
