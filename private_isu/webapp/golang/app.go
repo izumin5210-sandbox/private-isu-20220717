@@ -101,6 +101,7 @@ func dbInitialize() {
 		"DELETE FROM comments WHERE id > 100000",
 		"UPDATE users SET del_flg = 0",
 		"UPDATE users SET del_flg = 1 WHERE id % 50 = 0",
+		"UPDATE posts SET comment_count = 0 AND recent_comment_ids = NULL",
 	}
 
 	for _, sql := range sqls {
