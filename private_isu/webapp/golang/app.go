@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	crand "crypto/rand"
 	"fmt"
 	"html/template"
@@ -24,6 +25,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
@@ -100,11 +102,14 @@ func imgInitialize() {
 	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
 
 	var wg sync.WaitGroup
+	sem := semaphore.NewWeighted(20)
 	for _, p := range posts {
 		p := p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			sem.Acquire(context.TODO(), 1)
+			defer sem.Release(1)
 			path := assetsDir + imageURL(p)
 			os.WriteFile(path, p.Imgdata, 0o644)
 		}()
