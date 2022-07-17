@@ -102,7 +102,7 @@ func imgInitialize() {
 	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
 
 	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(20)
+	sem := semaphore.NewWeighted(100)
 	for _, p := range posts {
 		p := p
 		wg.Add(1)
@@ -289,7 +289,9 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
-	imgInitialize()
+	if r.URL.Query().Has("all") {
+		imgInitialize()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
