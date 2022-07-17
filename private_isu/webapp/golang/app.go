@@ -781,7 +781,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var post Post
+	post := Post{}
 	err = db.Get(&post, "SELECT id, comment_count, recent_comment_ids from posts where id = ?", postID)
 	if err != nil {
 		log.Print(err)
