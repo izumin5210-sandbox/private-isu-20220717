@@ -32,7 +32,7 @@ var (
 
 const (
 	postsPerPage  = 20
-	assetsDir     = "../assets"
+	assetsDir     = "../public/"
 	ISO8601Format = "2006-01-02T15:04:05-07:00"
 	UploadLimit   = 10 * 1024 * 1024 // 10mb
 )
@@ -93,7 +93,7 @@ func dbInitialize() {
 }
 
 func imgInitialize() {
-	os.RemoveAll(assetsDir)
+	os.RemoveAll(assetsDir + "/image")
 	os.Mkdir(assetsDir+"/image", 0o750)
 	var posts []Post
 	db.Select(&posts, "select id, mime, imgdata from post")
