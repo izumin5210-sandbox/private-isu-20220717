@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	crand "crypto/rand"
+	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -40,6 +42,16 @@ const (
 	UploadLimit   = 10 * 1024 * 1024 // 10mb
 )
 
+type JSONNumberArray []int
+
+func (j JSONNumberArray) Scan(src interface{}) error {
+	return json.Unmarshal(src.([]byte), &j)
+}
+
+func (j JSONNumberArray) Value() (driver.Value, error) {
+	return json.Marshal(j)
+}
+
 type User struct {
 	ID          int       `db:"id"`
 	AccountName string    `db:"account_name"`
@@ -50,14 +62,14 @@ type User struct {
 }
 
 type Post struct {
-	ID               int       `db:"id"`
-	UserID           int       `db:"user_id"`
-	Imgdata          []byte    `db:"imgdata"`
-	Body             string    `db:"body"`
-	Mime             string    `db:"mime"`
-	CreatedAt        time.Time `db:"created_at"`
-	CommentCount     int       `db:"comment_count"`
-	RecentCommentIDs []int     `db:"recent_comment_ids"`
+	ID               int             `db:"id"`
+	UserID           int             `db:"user_id"`
+	Imgdata          []byte          `db:"imgdata"`
+	Body             string          `db:"body"`
+	Mime             string          `db:"mime"`
+	CreatedAt        time.Time       `db:"created_at"`
+	CommentCount     int             `db:"comment_count"`
+	RecentCommentIDs JSONNumberArray `db:"recent_comment_ids"`
 	Comments         []Comment
 	User             User
 	CSRFToken        string
