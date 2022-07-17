@@ -128,12 +128,23 @@ func dbCacheInitialize() {
 		postById[comm.PostID] = post
 	}
 
+	var wg sync.WaitGroup
+	sem := semaphore.NewWeighted(100)
 	for id, post := range postById {
-		_, err := db.Exec("UPDATE posts SET comment_count = ?, recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, id)
-		if err != nil {
-			fmt.Println(err)
-		}
+		id := id
+		post := post
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem.Acquire(context.TODO(), 1)
+			defer sem.Release(1)
+			_, err := db.Exec("UPDATE posts SET comment_count = ?, recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, id)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func imgInitialize() {
