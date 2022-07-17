@@ -128,8 +128,8 @@ func dbCacheInitialize() {
 		postById[comm.PostID] = post
 	}
 
-	for _, post := range postById {
-		_, err := db.Exec("UPDATE posts SET comment_count = ? AND recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, post.ID)
+	for id, post := range postById {
+		_, err := db.Exec("UPDATE posts SET comment_count = ?, recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, id)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -797,7 +797,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		post.RecentCommentIDs = post.RecentCommentIDs[:3]
 	}
 
-	_, err = db.Exec("UPDATE posts SET comment_count = ? and recent_comment_ids = ? where id = ?", post.CommentCount, post.RecentCommentIDs, post.ID)
+	_, err = db.Exec("UPDATE posts SET comment_count = ?, recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, post.ID)
 	if err != nil {
 		log.Print(err)
 		return
