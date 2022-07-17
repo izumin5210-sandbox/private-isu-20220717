@@ -774,7 +774,30 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
-	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	resp, err := db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	commentID, err := resp.LastInsertId()
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	var post Post
+	err = db.Get(&post, "SELECT id, comment_count, recent_comment_ids from posts where id = ?", postID)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	post.CommentCount += 1
+	post.RecentCommentIDs = append([]int{int(commentID)}, post.RecentCommentIDs...)
+	if len(post.RecentCommentIDs) > 3 {
+		post.RecentCommentIDs = post.RecentCommentIDs[:3]
+	}
+
+	_, err = db.Exec("UPDATE posts SET comment_count = ? and recent_comment_ids = ? where id = ?", post.CommentCount, post.RecentCommentIDs, post.ID)
 	if err != nil {
 		log.Print(err)
 		return
