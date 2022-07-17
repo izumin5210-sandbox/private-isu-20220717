@@ -95,7 +95,7 @@ func dbInitialize() {
 
 func imgInitialize() {
 	os.RemoveAll(assetsDir + "/image")
-	os.Mkdir(assetsDir+"/image", 0o750)
+	os.Mkdir(assetsDir+"/image", 0o755)
 	var posts []Post
 	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
 
