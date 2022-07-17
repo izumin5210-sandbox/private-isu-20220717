@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	crand "crypto/rand"
 	"database/sql/driver"
@@ -128,23 +129,20 @@ func dbCacheInitialize() {
 		postById[comm.PostID] = post
 	}
 
-	var wg sync.WaitGroup
-	sem := semaphore.NewWeighted(100)
+	valuesQ := make([]string, 0, len(postById))
+	values := make([]interface{}, 0, len(postById)*3)
 	for id, post := range postById {
-		id := id
-		post := post
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem.Acquire(context.TODO(), 1)
-			defer sem.Release(1)
-			_, err := db.Exec("UPDATE posts SET comment_count = ?, recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, id)
-			if err != nil {
-				fmt.Println(err)
-			}
-		}()
+		values = append(values, id, post.CommentCount, post.RecentCommentIDs)
+		valuesQ = append(valuesQ, "(?,?,?)")
 	}
-	wg.Wait()
+
+	qb := bytes.NewBufferString("INSERT INTO posts (id, comment_count, recent_comment_ids) VALUES ")
+	qb.WriteString(strings.Join(valuesQ, ","))
+	qb.WriteString(" ON DUPLICATE KEY UPDATE id=VALUES(id)")
+	_, err := db.Exec(qb.String(), values...)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func imgInitialize() {
