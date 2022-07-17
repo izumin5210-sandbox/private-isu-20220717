@@ -852,7 +852,7 @@ func main() {
 	})
 
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
+		log.Println(http.ListenAndServe(":6060", nil))
 	}()
 
 	log.Fatal(http.ListenAndServe(":8080", r))
