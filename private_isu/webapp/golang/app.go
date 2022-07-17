@@ -96,7 +96,7 @@ func imgInitialize() {
 	os.RemoveAll(assetsDir + "/image")
 	os.Mkdir(assetsDir+"/image", 0o750)
 	var posts []Post
-	db.Select(&posts, "select id, mime, imgdata from post")
+	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
 	for _, p := range posts {
 		path := assetsDir + imageURL(p)
 		os.WriteFile(path, p.Imgdata, 0o644)
