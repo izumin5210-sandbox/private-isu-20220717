@@ -45,7 +45,11 @@ const (
 type JSONNumberArray []int
 
 func (j JSONNumberArray) Scan(src interface{}) error {
-	return json.Unmarshal(src.([]byte), &j)
+	v, ok := src.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(v, &j)
 }
 
 func (j JSONNumberArray) Value() (driver.Value, error) {
@@ -781,7 +785,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	post := Post{}
+	var post Post
 	err = db.Get(&post, "SELECT id, comment_count, recent_comment_ids from posts where id = ?", postID)
 	if err != nil {
 		log.Print(err)
