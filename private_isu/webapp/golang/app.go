@@ -50,16 +50,17 @@ type User struct {
 }
 
 type Post struct {
-	ID           int       `db:"id"`
-	UserID       int       `db:"user_id"`
-	Imgdata      []byte    `db:"imgdata"`
-	Body         string    `db:"body"`
-	Mime         string    `db:"mime"`
-	CreatedAt    time.Time `db:"created_at"`
-	CommentCount int
-	Comments     []Comment
-	User         User
-	CSRFToken    string
+	ID               int       `db:"id"`
+	UserID           int       `db:"user_id"`
+	Imgdata          []byte    `db:"imgdata"`
+	Body             string    `db:"body"`
+	Mime             string    `db:"mime"`
+	CreatedAt        time.Time `db:"created_at"`
+	CommentCount     int       `db:"comment_count"`
+	RecentCommentIDs []int     `db:"recent_comment_ids"`
+	Comments         []Comment
+	User             User
+	CSRFToken        string
 }
 
 type Comment struct {
@@ -92,6 +93,29 @@ func dbInitialize() {
 
 	for _, sql := range sqls {
 		db.Exec(sql)
+	}
+}
+
+func dbCacheInitialize() {
+	var comments []Comment
+	db.Select(&comments, "select `id`, `post_id` from `comments` order by `id`")
+	postById := make(map[int]Post)
+
+	for _, comm := range comments {
+		post := postById[comm.PostID]
+		post.CommentCount += 1
+		post.RecentCommentIDs = append([]int{comm.ID}, post.RecentCommentIDs...)
+		if len(post.RecentCommentIDs) > 3 {
+			post.RecentCommentIDs = post.RecentCommentIDs[0:3]
+		}
+		postById[comm.PostID] = post
+	}
+
+	for _, post := range postById {
+		_, err := db.Exec("UPDATE posts SET comment_count = ? AND recent_comment_ids = ? WHERE id = ?", post.CommentCount, post.RecentCommentIDs, post.ID)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 
@@ -289,9 +313,23 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dbCacheInitialize()
+	}()
+
 	if r.URL.Query().Has("all") {
-		imgInitialize()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			imgInitialize()
+		}()
 	}
+
+	wg.Wait()
 	w.WriteHeader(http.StatusOK)
 }
 
