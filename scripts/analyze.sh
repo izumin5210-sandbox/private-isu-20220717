@@ -14,4 +14,4 @@ sudo systemctl reload nginx
 sudo systemctl restart mysql
 
 sudo cat ${LOG_DIR}/nginx.access.log | ./alp json --sort sum -r -m '/image/\d+.\w+','/posts/\d+','/@\w+'
-sudo mysqldumpslow ${LOG_DIR}/mysql.slow.log
+sudo mysqldumpslow -s t ${LOG_DIR}/mysql.slow.log | head -n 100
