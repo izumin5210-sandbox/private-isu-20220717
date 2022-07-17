@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -97,10 +98,18 @@ func imgInitialize() {
 	os.Mkdir(assetsDir+"/image", 0o750)
 	var posts []Post
 	db.Select(&posts, "select `id`, `mime`, `imgdata` from `posts`")
+
+	var wg sync.WaitGroup
 	for _, p := range posts {
-		path := assetsDir + imageURL(p)
-		os.WriteFile(path, p.Imgdata, 0o644)
+		p := p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := assetsDir + imageURL(p)
+			os.WriteFile(path, p.Imgdata, 0o644)
+		}()
 	}
+	wg.Wait()
 }
 
 func tryLogin(accountName, password string) *User {
