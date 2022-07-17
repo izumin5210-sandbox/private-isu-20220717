@@ -275,6 +275,7 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	imgInitialize()
 	w.WriteHeader(http.StatusOK)
 }
 
