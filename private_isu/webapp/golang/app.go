@@ -101,6 +101,8 @@ func dbInitialize() {
 }
 
 func cacheInitialize() {
+	redisClient.FlushDB(context.TODO()).Err()
+
 	var comments []Comment
 	db.Select(&comments, "select `id`, `post_id` from `comments` order by `id`")
 	postById := make(map[int]Post)
