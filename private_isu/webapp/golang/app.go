@@ -330,7 +330,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	userIDs := userIDSet.Slice()
 	users := make([]User, 0, len(userIDs))
 	if len(userIDs) > 0 {
-		usersQuery, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", commIDs)
+		usersQuery, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", userIDs)
 		if err != nil {
 			return nil, err
 		}
