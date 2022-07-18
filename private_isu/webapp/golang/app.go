@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -242,7 +243,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 	for _, p := range results {
 		commCnt, err := commentCountByPostID[p.ID].Int()
-		if err != nil {
+		if err != nil && !errors.Is(err, redis.Nil) {
 			return nil, err
 		}
 		p.CommentCount = commCnt
