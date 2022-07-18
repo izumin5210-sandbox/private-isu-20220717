@@ -230,11 +230,22 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	var posts []Post
 
+	commentCountByPostID := make(map[int]*redis.StringCmd, len(results))
+	pipe := redisClient.Pipeline()
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
+		commentCountByPostID[p.ID] = pipe.Get(context.TODO(), postCommentCountKey(p.ID))
+	}
+	_, err := pipe.Exec(context.TODO())
+	if err != nil {
+		return nil, err
+	}
+
+	for _, p := range results {
+		commCnt, err := commentCountByPostID[p.ID].Int()
 		if err != nil {
 			return nil, err
 		}
+		p.CommentCount = commCnt
 
 		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC"
 		if !allComments {
