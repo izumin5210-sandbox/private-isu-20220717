@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -235,18 +236,81 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 	}
 }
 
+type Set[V comparable] struct {
+	m map[V]struct{}
+}
+
+func NewSet[V comparable](cap int) *Set[V] {
+	return &Set[V]{m: make(map[V]struct{}, cap)}
+}
+
+func (s *Set[V]) Add(v V) {
+	s.m[v] = struct{}{}
+}
+
+func (s *Set[V]) Slice() []V {
+	slice := make([]V, len(s.m))
+	i := 0
+	for v := range s.m {
+		slice[i] = v
+		i++
+	}
+	return slice
+}
+
+func IndexBy[K comparable, V any](inputs []V, keyFunc func(v V) K) map[K][]V {
+	m := make(map[K][]V, len(inputs))
+	for _, input := range inputs {
+		m[keyFunc(input)] = append(m[keyFunc(input)], input)
+	}
+	return m
+}
+
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	var posts []Post
 
+	var commentRangeStop int64 = 2
+	if allComments {
+		commentRangeStop = -1
+	}
+
 	commentCountByPostID := make(map[int]*redis.StringCmd, len(results))
+	commentIDsByPostID := make(map[int]*redis.StringSliceCmd, len(results))
 	pipe := redisClient.Pipeline()
 	for _, p := range results {
 		commentCountByPostID[p.ID] = pipe.Get(context.TODO(), postCommentCountKey(p.ID))
+		commentIDsByPostID[p.ID] = pipe.ZRevRange(context.TODO(), postReecntCommentsKey(p.ID), 0, commentRangeStop)
 	}
 	_, err := pipe.Exec(context.TODO())
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
+
+	commIDSet := NewSet[int](len(results) * 3)
+	for _, cmd := range commentIDsByPostID {
+		var ids []int
+		err := cmd.ScanSlice(&ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			commIDSet.Add(id)
+		}
+	}
+
+	commIDs := commIDSet.Slice()
+	commentsQuery, args, err := sqlx.In("SELECT * FROM comments WHERE post_id IN (?)", commIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	comments := make([]Comment, 0, len(commIDs))
+	err = db.Select(&comments, commentsQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	commentsByPostID := IndexBy(comments, func(c Comment) int { return c.PostID })
 
 	for _, p := range results {
 		commCnt, err := commentCountByPostID[p.ID].Int()
@@ -255,26 +319,16 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 		p.CommentCount = commCnt
 
-		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC"
-		if !allComments {
-			query += " LIMIT 3"
-		}
-		var comments []Comment
-		err = db.Select(&comments, query, p.ID)
-		if err != nil {
-			return nil, err
-		}
+		comments := commentsByPostID[p.ID]
+		sort.Slice(comments, func(i, j int) bool {
+			return comments[i].CreatedAt.Before(comments[j].CreatedAt)
+		})
 
 		for i := 0; i < len(comments); i++ {
 			err := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID)
 			if err != nil {
 				return nil, err
 			}
-		}
-
-		// reverse
-		for i, j := 0, len(comments)-1; i < j; i, j = i+1, j-1 {
-			comments[i], comments[j] = comments[j], comments[i]
 		}
 
 		p.Comments = comments
