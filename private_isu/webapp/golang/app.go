@@ -318,6 +318,7 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	cacheInitialize()
 	if r.URL.Query().Has("all") {
 		imgInitialize()
 	}
