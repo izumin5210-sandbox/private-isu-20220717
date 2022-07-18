@@ -108,13 +108,16 @@ func cacheInitialize() {
 	db.Select(&comments, "select `id`, `post_id` from `comments` order by `id`")
 	postById := make(map[int]Post)
 
+	pipe := redisClient.Pipeline()
+
 	for _, comm := range comments {
 		post := postById[comm.PostID]
 		post.CommentCount += 1
 		postById[comm.PostID] = post
+
+		pipe.ZAdd(context.TODO(), postReecntCommentsKey(comm.PostID), &redis.Z{Score: float64(comm.ID), Member: comm.ID})
 	}
 
-	pipe := redisClient.Pipeline()
 	for postID, post := range postById {
 		pipe.Set(context.TODO(), postCommentCountKey(postID), post.CommentCount, 0)
 	}
@@ -123,6 +126,10 @@ func cacheInitialize() {
 
 func postCommentCountKey(postID int) string {
 	return fmt.Sprintf("posts:%d:commentCount", postID)
+}
+
+func postReecntCommentsKey(postID int) string {
+	return fmt.Sprintf("posts:%d:recentComments", postID)
 }
 
 func imgInitialize() {
@@ -767,14 +774,23 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
-	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	resp, err := db.Exec(query, postID, me.ID, r.FormValue("comment"))
 	if err != nil {
 		log.Print(err)
 		return
 	}
 
-	err = redisClient.Incr(context.TODO(), postCommentCountKey(postID)).Err()
+	commID, err := resp.LastInsertId()
 	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	pipe := redisClient.Pipeline()
+	pipe.Incr(context.TODO(), postCommentCountKey(postID)).Err()
+	pipe.ZAdd(context.TODO(), postReecntCommentsKey(postID), &redis.Z{Score: float64(commID), Member: commID})
+	_, err = pipe.Exec(context.TODO())
+	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Print(err)
 		return
 	}
