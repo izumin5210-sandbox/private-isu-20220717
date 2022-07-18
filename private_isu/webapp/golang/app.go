@@ -299,15 +299,17 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	}
 
 	commIDs := commIDSet.Slice()
-	commentsQuery, args, err := sqlx.In("SELECT * FROM comments WHERE post_id IN (?)", commIDs)
-	if err != nil {
-		return nil, err
-	}
-
 	comments := make([]Comment, 0, len(commIDs))
-	err = db.Select(&comments, commentsQuery, args...)
-	if err != nil {
-		return nil, err
+	if len(commIDs) > 0 {
+		commentsQuery, args, err := sqlx.In("SELECT * FROM comments WHERE post_id IN (?)", commIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		err = db.Select(&comments, commentsQuery, args...)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	commentsByPostID := IndexBy(comments, func(c Comment) int { return c.PostID })
