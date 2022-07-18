@@ -22,6 +22,7 @@ import (
 	"github.com/bradfitz/gomemcache/memcache"
 	gsm "github.com/bradleypeabody/gorilla-sessions-memcache"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-redis/redis/v8"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -29,8 +30,9 @@ import (
 )
 
 var (
-	db    *sqlx.DB
-	store *gsm.MemcacheStore
+	db          *sqlx.DB
+	store       *gsm.MemcacheStore
+	redisClient *redis.Client
 )
 
 const (
@@ -77,6 +79,9 @@ func init() {
 		memdAddr = "localhost:11211"
 	}
 	memcacheClient := memcache.New(memdAddr)
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 	store = gsm.NewMemcacheStore(memcacheClient, "iscogram_", []byte("sendagaya"))
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
