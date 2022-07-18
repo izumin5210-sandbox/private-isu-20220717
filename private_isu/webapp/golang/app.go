@@ -237,7 +237,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		commentCountByPostID[p.ID] = pipe.Get(context.TODO(), postCommentCountKey(p.ID))
 	}
 	_, err := pipe.Exec(context.TODO())
-	if err != nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
 
