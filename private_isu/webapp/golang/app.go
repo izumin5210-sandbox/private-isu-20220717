@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"github.com/bradfitz/gomemcache/memcache"
 	gsm "github.com/bradleypeabody/gorilla-sessions-memcache"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-redis/redis/v8"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -29,8 +31,9 @@ import (
 )
 
 var (
-	db    *sqlx.DB
-	store *gsm.MemcacheStore
+	db          *sqlx.DB
+	store       *gsm.MemcacheStore
+	redisClient *redis.Client
 )
 
 const (
@@ -77,6 +80,9 @@ func init() {
 		memdAddr = "localhost:11211"
 	}
 	memcacheClient := memcache.New(memdAddr)
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 	store = gsm.NewMemcacheStore(memcacheClient, "iscogram_", []byte("sendagaya"))
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
@@ -93,6 +99,30 @@ func dbInitialize() {
 	for _, sql := range sqls {
 		db.Exec(sql)
 	}
+}
+
+func cacheInitialize() {
+	redisClient.FlushDB(context.TODO()).Err()
+
+	var comments []Comment
+	db.Select(&comments, "select `id`, `post_id` from `comments` order by `id`")
+	postById := make(map[int]Post)
+
+	for _, comm := range comments {
+		post := postById[comm.PostID]
+		post.CommentCount += 1
+		postById[comm.PostID] = post
+	}
+
+	pipe := redisClient.Pipeline()
+	for postID, post := range postById {
+		pipe.Set(context.TODO(), postCommentCountKey(postID), post.CommentCount, 0)
+	}
+	pipe.Exec(context.TODO())
+}
+
+func postCommentCountKey(postID int) string {
+	return fmt.Sprintf("posts:%d:commentCount", postID)
 }
 
 func imgInitialize() {
@@ -201,11 +231,22 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	var posts []Post
 
+	commentCountByPostID := make(map[int]*redis.StringCmd, len(results))
+	pipe := redisClient.Pipeline()
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
-		if err != nil {
+		commentCountByPostID[p.ID] = pipe.Get(context.TODO(), postCommentCountKey(p.ID))
+	}
+	_, err := pipe.Exec(context.TODO())
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	for _, p := range results {
+		commCnt, err := commentCountByPostID[p.ID].Int()
+		if err != nil && !errors.Is(err, redis.Nil) {
 			return nil, err
 		}
+		p.CommentCount = commCnt
 
 		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC"
 		if !allComments {
@@ -289,6 +330,7 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	cacheInitialize()
 	if r.URL.Query().Has("all") {
 		imgInitialize()
 	}
@@ -491,22 +533,23 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	commentedCount := 0
 	if postCount > 0 {
-		s := []string{}
-		for range postIDs {
-			s = append(s, "?")
+		pipe := redisClient.Pipeline()
+		postCommCntByPostID := make(map[int]*redis.StringCmd, len(postIDs))
+		for _, postID := range postIDs {
+			postCommCntByPostID[postID] = pipe.Get(context.TODO(), postCommentCountKey(postID))
 		}
-		placeholder := strings.Join(s, ", ")
-
-		// convert []int -> []interface{}
-		args := make([]interface{}, len(postIDs))
-		for i, v := range postIDs {
-			args[i] = v
-		}
-
-		err = db.Get(&commentedCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ("+placeholder+")", args...)
-		if err != nil {
+		_, err = pipe.Exec(context.TODO())
+		if err != nil && !errors.Is(err, redis.Nil) {
 			log.Print(err)
 			return
+		}
+		for _, cmd := range postCommCntByPostID {
+			cnt, err := cmd.Int()
+			if err != nil && !errors.Is(err, redis.Nil) {
+				log.Print(err)
+				return
+			}
+			commentedCount += cnt
 		}
 	}
 
@@ -725,6 +768,12 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
 	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	err = redisClient.Incr(context.TODO(), postCommentCountKey(postID)).Err()
 	if err != nil {
 		log.Print(err)
 		return
