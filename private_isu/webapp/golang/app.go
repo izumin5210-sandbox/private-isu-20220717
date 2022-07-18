@@ -100,6 +100,28 @@ func dbInitialize() {
 	}
 }
 
+func cacheInitialize() {
+	var comments []Comment
+	db.Select(&comments, "select `id`, `post_id` from `comments` order by `id`")
+	postById := make(map[int]Post)
+
+	for _, comm := range comments {
+		post := postById[comm.PostID]
+		post.CommentCount += 1
+		postById[comm.PostID] = post
+	}
+
+	pipe := redisClient.Pipeline()
+	for postID, post := range postById {
+		pipe.Set(context.TODO(), postCommentCountKey(postID), post.CommentCount, 0)
+	}
+	pipe.Exec(context.TODO())
+}
+
+func postCommentCountKey(postID int) string {
+	return fmt.Sprintf("posts:%d:commentCount", postID)
+}
+
 func imgInitialize() {
 	os.RemoveAll(assetsDir + "/image")
 	os.Mkdir(assetsDir+"/image", 0o755)
@@ -730,6 +752,12 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 
 	query := "INSERT INTO `comments` (`post_id`, `user_id`, `comment`) VALUES (?,?,?)"
 	_, err = db.Exec(query, postID, me.ID, r.FormValue("comment"))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	err = redisClient.Incr(context.TODO(), postCommentCountKey(postID)).Err()
 	if err != nil {
 		log.Print(err)
 		return
