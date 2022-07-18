@@ -533,22 +533,23 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	commentedCount := 0
 	if postCount > 0 {
-		s := []string{}
-		for range postIDs {
-			s = append(s, "?")
+		pipe := redisClient.Pipeline()
+		postCommCntByPostID := make(map[int]*redis.StringCmd, len(postIDs))
+		for _, postID := range postIDs {
+			postCommCntByPostID[postID] = pipe.Get(context.TODO(), postCommentCountKey(postID))
 		}
-		placeholder := strings.Join(s, ", ")
-
-		// convert []int -> []interface{}
-		args := make([]interface{}, len(postIDs))
-		for i, v := range postIDs {
-			args[i] = v
-		}
-
-		err = db.Get(&commentedCount, "SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ("+placeholder+")", args...)
-		if err != nil {
+		_, err = pipe.Exec(context.TODO())
+		if err != nil && !errors.Is(err, redis.Nil) {
 			log.Print(err)
 			return
+		}
+		for _, cmd := range postCommCntByPostID {
+			cnt, err := cmd.Int()
+			if err != nil && !errors.Is(err, redis.Nil) {
+				log.Print(err)
+				return
+			}
+			commentedCount += cnt
 		}
 	}
 
