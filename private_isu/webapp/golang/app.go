@@ -258,10 +258,18 @@ func (s *Set[V]) Slice() []V {
 	return slice
 }
 
-func IndexBy[K comparable, V any](inputs []V, keyFunc func(v V) K) map[K][]V {
+func GroupBy[K comparable, V any](inputs []V, keyFunc func(v V) K) map[K][]V {
 	m := make(map[K][]V, len(inputs))
 	for _, input := range inputs {
 		m[keyFunc(input)] = append(m[keyFunc(input)], input)
+	}
+	return m
+}
+
+func IndexBy[K comparable, V any](inputs []V, keyFunc func(v V) K) map[K]V {
+	m := make(map[K]V, len(inputs))
+	for _, input := range inputs {
+		m[keyFunc(input)] = input
 	}
 	return m
 }
@@ -301,7 +309,7 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 	commIDs := commIDSet.Slice()
 	comments := make([]Comment, 0, len(commIDs))
 	if len(commIDs) > 0 {
-		commentsQuery, args, err := sqlx.In("SELECT * FROM comments WHERE post_id IN (?)", commIDs)
+		commentsQuery, args, err := sqlx.In("SELECT * FROM comments WHERE id IN (?)", commIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +320,29 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		}
 	}
 
-	commentsByPostID := IndexBy(comments, func(c Comment) int { return c.PostID })
+	userIDSet := NewSet[int](len(comments) + len(results))
+	for _, p := range results {
+		userIDSet.Add(p.UserID)
+	}
+	for _, c := range comments {
+		userIDSet.Add(c.UserID)
+	}
+	userIDs := userIDSet.Slice()
+	users := make([]User, 0, len(userIDs))
+	if len(userIDs) > 0 {
+		usersQuery, args, err := sqlx.In("SELECT * FROM users WHERE id IN (?)", commIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		err = db.Select(&users, usersQuery, args...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	commentsByPostID := GroupBy(comments, func(c Comment) int { return c.PostID })
+	userByID := IndexBy(users, func(u User) int { return u.ID })
 
 	for _, p := range results {
 		commCnt, err := commentCountByPostID[p.ID].Int()
@@ -327,19 +357,12 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 		})
 
 		for i := 0; i < len(comments); i++ {
-			err := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID)
-			if err != nil {
-				return nil, err
-			}
+			comments[i].User = userByID[comments[i].UserID]
 		}
 
 		p.Comments = comments
 
-		err = db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID)
-		if err != nil {
-			return nil, err
-		}
-
+		p.User = userByID[p.UserID]
 		p.CSRFToken = csrfToken
 
 		if p.User.DelFlg == 0 {
